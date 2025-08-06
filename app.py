@@ -1,12 +1,10 @@
-
 import streamlit as st
-import pickle
 import docx2txt
-from docx import Document
-import fitz  # PyMuPDF
-import os
+import pickle
+import numpy as np
+from sklearn.preprocessing import LabelEncoder
 
-# Load the model, vectorizer, and encoder
+# Load the trained model and other components
 with open('resume_classifier.pkl', 'rb') as f:
     model = pickle.load(f)
 
@@ -14,48 +12,52 @@ with open('tfidf_vectorizer.pkl', 'rb') as f:
     vectorizer = pickle.load(f)
 
 with open('label_encoder.pkl', 'rb') as f:
-    le = pickle.load(f)
+    label_encoder = pickle.load(f)
 
-# Text extraction function
-def extract_text_from_docx(uploaded_file):
-    try:
-        return docx2txt.process(uploaded_file)
-    except Exception as e:
-        return f"Error reading DOCX file: {str(e)}"
+# Title and Header
+st.title("📄 Resume Classification App")
+st.markdown("Classify resumes into one of the predefined job categories using a trained NLP model.")
 
-def extract_text_from_pdf(uploaded_file):
-    try:
-        with fitz.open(stream=uploaded_file.read(), filetype="pdf") as doc:
-            text = ""
-            for page in doc:
-                text += page.get_text()
-        return text
-    except Exception as e:
-        return f"Error reading PDF file: {str(e)}"
+# Section 1: Choose Category (optional, for display/demo)
+st.subheader("Select Expected Category (Optional)")
+categories = label_encoder.classes_.tolist()
+selected_category = st.selectbox("Choose a category to compare prediction with:", ["-- None --"] + categories)
 
-def predict_resume_category(text):
-    text_vector = vectorizer.transform([text])
-    prediction = model.predict(text_vector)
-    category = le.inverse_transform(prediction)[0]
-    return category
+# Section 2: Resume Upload or Text Input
+st.subheader("Upload Resume or Paste Text")
+resume_text = ""
 
-# Streamlit UI
-st.set_page_config(page_title="Resume Category Classifier", layout="centered")
-st.title("🧠 Resume Category Classifier")
-st.markdown("Upload a resume file (.docx or .pdf) and get the predicted job category!")
+upload_option = st.radio("Choose input method:", ("Upload DOCX file", "Paste Resume Text"))
 
-uploaded_file = st.file_uploader("Upload Resume", type=["docx", "pdf"])
+if upload_option == "Upload DOCX file":
+    uploaded_file = st.file_uploader("Upload your resume (.docx format)", type=["docx"])
+    if uploaded_file:
+        resume_text = docx2txt.process(uploaded_file)
+        st.success("Resume uploaded successfully!")
+        st.text_area("Extracted Resume Text", resume_text, height=200)
+else:
+    resume_text = st.text_area("Paste your resume text below", "", height=200)
 
-if uploaded_file is not None:
-    if uploaded_file.type == "application/pdf":
-        resume_text = extract_text_from_pdf(uploaded_file)
+# Section 3: Predict Button
+if st.button("🔍 Predict Category"):
+    if not resume_text.strip():
+        st.warning("Please upload or paste a resume first.")
     else:
-        resume_text = extract_text_from_docx(uploaded_file)
+        # Transform and predict
+        vectorized_input = vectorizer.transform([resume_text])
+        prediction = model.predict(vectorized_input)
+        predicted_category = label_encoder.inverse_transform(prediction)[0]
 
-    if resume_text:
-        st.subheader("📄 Extracted Text Preview:")
-        st.text(resume_text[:500] + "..." if len(resume_text) > 500 else resume_text)
+        st.markdown("### 🧠 Model Prediction")
+        st.success(f"**Predicted Category:** {predicted_category}")
 
-        if st.button("Predict Category"):
-            category = predict_resume_category(resume_text)
-            st.success(f"🎯 Predicted Resume Category: **{category}**")
+        # Optional: Show if user's selected expected category matches
+        if selected_category != "-- None --":
+            if selected_category == predicted_category:
+                st.info("✅ Matches your selected category!")
+            else:
+                st.error("❌ Does NOT match your selected category!")
+
+# Footer
+st.markdown("---")
+st.markdown("Made with ❤️ using Streamlit · Resume Classification using NLP")
