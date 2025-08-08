@@ -1,4 +1,3 @@
-# app.py
 import os
 import random
 import re
@@ -10,7 +9,28 @@ import pickle
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 
-# Load model and vectorizer
+# ========== NEW DATA EXTRACTION FUNCTION ==========
+def extract_all_resumes(DATA_DIR="P-561 Dataset"):
+    data = []
+    for category in os.listdir(DATA_DIR):
+        category_path = os.path.join(DATA_DIR, category)
+        if os.path.isdir(category_path):
+            for filename in os.listdir(category_path):
+                if filename.endswith(".docx"):
+                    file_path = os.path.join(category_path, filename)
+                    text = extract_text_from_docx(file_path)
+                    details = extract_details(text)
+                    details.update({
+                        "Resume": text,
+                        "Category": category,
+                        "Filename": filename
+                    })
+                    data.append(details)
+    df = pd.DataFrame(data)
+    df.to_csv("resume_dataset.csv", index=False)
+    return df
+
+# ========== EXISTING FUNCTIONS ==========
 model = pickle.load(open("resume_classifier.pkl", "rb"))
 vectorizer = pickle.load(open("tfidf_vectorizer.pkl", "rb"))
 
@@ -54,6 +74,11 @@ def show_resume_details(text):
 # Streamlit UI
 st.set_page_config(page_title="AI Resume Classifier", layout="wide")
 st.title("📄 AI Resume Classifier")
+
+# Optional: trigger full data extraction and save as CSV
+if st.sidebar.button("🔄 Re-Extract All Resumes"):
+    df = extract_all_resumes(DATA_DIR)
+    st.sidebar.success(f"Extracted and saved {len(df)} resumes to resume_dataset.csv")
 
 categories = sorted(os.listdir(DATA_DIR))
 category = st.selectbox("Select a Category", categories)
