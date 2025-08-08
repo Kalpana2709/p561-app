@@ -1,86 +1,141 @@
 import streamlit as st
-import random
+import pandas as pd
+import numpy as np
 import os
-import docx
+import random
 import pickle
-import base64
+import docx2txt
 import matplotlib.pyplot as plt
+import re
+from sklearn.preprocessing import LabelEncoder
 
-# Load model and vectorizer
+# Load models and encoders
 model = pickle.load(open("resume_classifier.pkl", "rb"))
-vectorizer = pickle.load(open("tfidf_vectorizer.pkl", "rb"))
-label_encoder = pickle.load(open("label_encoder.pkl", "rb"))
+tfidf = pickle.load(open("tfidf_vectorizer.pkl", "rb"))
+le = pickle.load(open("label_encoder.pkl", "rb"))
 
-# Resume dataset directory
+# Data directory
 DATA_DIR = "P-561 Dataset/Resumes_Docx"
-
-st.title("🧠 AI Resume Classifier (Advanced)")
-st.write("Upload or select resumes to classify them using AI NLP model")
-
-# Get categories from folders
 categories = os.listdir(DATA_DIR)
-selected_category = st.selectbox("Choose a Resume Category", categories)
 
-# Get random resume from selected category
-resume_files = os.listdir(os.path.join(DATA_DIR, selected_category))
-selected_resume = random.choice(resume_files)
-resume_path = os.path.join(DATA_DIR, selected_category, selected_resume)
+# Extractor functions
+def extract_email(text):
+    match = re.findall(r"[\w\.-]+@[\w\.-]+", text)
+    return match[0] if match else "Not Found"
 
-st.subheader(f"📄 Selected Resume: `{selected_resume}`")
+def extract_phone(text):
+    match = re.findall(r"\+?\d[\d\s\-()]{8,}\d", text)
+    return match[0] if match else "Not Found"
 
-# Extract text from .docx
-def extract_text(docx_path):
-    doc = docx.Document(docx_path)
-    return "\n".join([para.text for para in doc.paragraphs])
+def extract_location(text):
+    # Basic location extractor from pre-defined location keywords
+    locations = ["Bangalore", "Mumbai", "Delhi", "Chennai", "Hyderabad", "Pune", "Kolkata"]
+    for loc in locations:
+        if loc.lower() in text.lower():
+            return loc
+    return "Not Found"
 
-resume_text = extract_text(resume_path)
-st.text_area("Resume Content", resume_text, height=200)
+def extract_name(text):
+    lines = text.strip().split("\n")
+    for line in lines:
+        if len(line.strip().split()) <= 4:
+            return line.strip()
+    return "Not Found"
 
-# Predict
-resume_vector = vectorizer.transform([resume_text])
-prediction = model.predict(resume_vector)[0]
-predicted_label = label_encoder.inverse_transform([prediction])[0]
+def extract_skills(text):
+    skills_keywords = ["python", "sql", "java", "machine learning", "data analysis", "excel", "react", "javascript"]
+    skills_found = [skill for skill in skills_keywords if skill in text.lower()]
+    return ", ".join(skills_found)
 
-# Display prediction result
-st.success(f"✅ Predicted Category: **{predicted_label}**")
+def extract_experience(text):
+    match = re.findall(r"\d+\+?\s+years", text.lower())
+    return match[0] if match else "Not Found"
 
-# Generate placeholders (or extract in future)
-name = f"{predicted_label.split()[0]} Candidate"
-place = "Bangalore"
-company = "TechCorp Inc."
-skills = ", ".join(predicted_label.split())
-experience = f"{random.randint(1, 10)} years"
-salary = f"₹{random.randint(3, 15)} LPA"
+def extract_salary(text):
+    match = re.findall(r"\₹?\d+(?:,\d{3})*(?:\.\d+)?\s*(?:LPA|per annum|pa)?", text.lower())
+    return match[0] if match else "Not Found"
 
-st.markdown(f"""
-### 📌 Resume Metadata
-- **Name:** {name}  
-- **Place:** {place}  
-- **Company:** {company}  
-- **Skills:** {skills}  
-- **Experience:** {experience}  
-- **Previous Salary:** {salary}
-""")
+# UI Components
+st.title("🧠 AI Resume Classifier")
+st.markdown("Upload a resume to predict the candidate category and extract useful insights.")
 
-# Generate Resume Summary
-st.markdown("### 📝 Resume Summary")
-st.info(f"This candidate is skilled in {skills}, has {experience} experience, and previously worked at {company} in {place}.")
+selected_category = st.selectbox("Choose a category to test", options=["Random"] + categories)
 
-# Visualization (Dummy pie chart)
-st.markdown("### 📊 Category Visualization (Example)")
+uploaded_file = st.file_uploader("Upload a .docx resume", type=["docx"])
+
+if st.button("🔍 Predict Resume") and uploaded_file:
+    resume_text = docx2txt.process(uploaded_file)
+    
+    X_input = tfidf.transform([resume_text])
+    pred_class = model.predict(X_input)
+    category = le.inverse_transform(pred_class)[0]
+
+    name = extract_name(resume_text)
+    email = extract_email(resume_text)
+    phone = extract_phone(resume_text)
+    location = extract_location(resume_text)
+    skills = extract_skills(resume_text)
+    exp = extract_experience(resume_text)
+    salary = extract_salary(resume_text)
+
+    st.success(f"✅ Predicted Category: {category}")
+
+    st.subheader("📋 Resume Details")
+    st.write(f"**Name:** {name}")
+    st.write(f"**Email:** {email}")
+    st.write(f"**Phone:** {phone}")
+    st.write(f"**Location:** {location}")
+    st.write(f"**Skills:** {skills if skills else 'Not Found'}")
+    st.write(f"**Experience:** {exp}")
+    st.write(f"**Expected Salary:** {salary}")
+
+    st.subheader("📝 Resume Summary")
+    st.text_area("Summary", resume_text, height=300)
+
+    # Download option
+    st.download_button("📥 Download Resume", data=resume_text, file_name=uploaded_file.name)
+
+# Random resume selector for demo
+if selected_category != "Random":
+    folder_path = os.path.join(DATA_DIR, selected_category)
+    all_files = os.listdir(folder_path)
+    if st.button("🔁 Show Random Resume from Category"):
+        random_file = random.choice(all_files)
+        file_path = os.path.join(folder_path, random_file)
+        resume_text = docx2txt.process(file_path)
+
+        X_input = tfidf.transform([resume_text])
+        pred_class = model.predict(X_input)
+        category = le.inverse_transform(pred_class)[0]
+
+        name = extract_name(resume_text)
+        email = extract_email(resume_text)
+        phone = extract_phone(resume_text)
+        location = extract_location(resume_text)
+        skills = extract_skills(resume_text)
+        exp = extract_experience(resume_text)
+        salary = extract_salary(resume_text)
+
+        st.success(f"✅ Predicted Category: {category}")
+
+        st.subheader("📋 Resume Details")
+        st.write(f"**Name:** {name}")
+        st.write(f"**Email:** {email}")
+        st.write(f"**Phone:** {phone}")
+        st.write(f"**Location:** {location}")
+        st.write(f"**Skills:** {skills if skills else 'Not Found'}")
+        st.write(f"**Experience:** {exp}")
+        st.write(f"**Expected Salary:** {salary}")
+
+        st.subheader("📝 Resume Summary")
+        st.text_area("Summary", resume_text, height=300)
+
+# Visualization Placeholder (Optional)
+# This can be replaced with actual prediction logs if tracked over time
+st.subheader("📊 Category Distribution (Sample)")
+category_counts = {cat: len(os.listdir(os.path.join(DATA_DIR, cat))) for cat in categories}
 fig, ax = plt.subplots()
-counts = [random.randint(5, 20) for _ in categories]
-ax.pie(counts, labels=categories, autopct="%1.1f%%", startangle=90)
-ax.axis("equal")
+ax.bar(category_counts.keys(), category_counts.values())
+plt.xticks(rotation=45)
+plt.title("Resume Category Distribution")
 st.pyplot(fig)
-
-# Provide Download link
-def create_download_link(path, filename):
-    with open(path, "rb") as f:
-        data = f.read()
-    b64 = base64.b64encode(data).decode()
-    href = f'<a href="data:application/octet-stream;base64,{b64}" download="{filename}">📥 Download Resume</a>'
-    return href
-
-st.markdown("### 📎 Download Resume File")
-st.markdown(create_download_link(resume_path, selected_resume), unsafe_allow_html=True)
