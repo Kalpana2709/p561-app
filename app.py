@@ -1,4 +1,3 @@
-
 import streamlit as st
 import os
 import pickle
@@ -8,24 +7,24 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import shutil
 
-# Load pre-trained model and vectorizer
+# Load pre-trained model, vectorizer, and label encoder
 model = pickle.load(open("resume_classifier.pkl", "rb"))
 vectorizer = pickle.load(open("tfidf_vectorizer.pkl", "rb"))
 label_encoder = pickle.load(open("label_encoder.pkl", "rb"))
 
 DATA_DIR = "P-561 Dataset"
-OUTPUT_EXCEL = "predicted_resume.xlsx"
+CSV_PATH = "resume_dataset.csv"
 
-st.set_page_config(page_title="AI Resume Classifier", layout="wide")
-st.title("🚀 AI Resume Classifier (Advanced Deployment)")
+st.set_page_config(page_title="Advanced AI Resume Classifier", layout="wide")
+st.title("🤖 Advanced AI Resume Classifier")
 
-# Extract fields from resume
+# ---------- Helper Functions ----------
 def extract_email(text):
     match = re.search(r"[\w\.-]+@[\w\.-]+", text)
     return match.group(0) if match else "Not found"
 
 def extract_phone(text):
-    match = re.search(r"(\+91[\-\s]?)?[6789]\d{9}", text)
+    match = re.search(r"(\+91[\s-]?)?[6789]\d{9}", text)
     return match.group(0) if match else "Not found"
 
 def extract_location(text):
@@ -52,57 +51,73 @@ def extract_details(text):
     }
 
 def predict_category(text):
-    vec = vectorizer.transform([text])
-    cat_index = model.predict(vec)[0]
-    return label_encoder.inverse_transform([cat_index])[0]
+    tfidf = vectorizer.transform([text])
+    pred = model.predict(tfidf)[0]
+    return pred, label_encoder.inverse_transform([pred])[0]
 
-# Category dropdown
-categories = sorted(os.listdir(DATA_DIR))
-selected_category = st.selectbox("📂 Select a Category", categories)
+def load_all_data():
+    data = []
+    for category in os.listdir(DATA_DIR):
+        cat_path = os.path.join(DATA_DIR, category)
+        if os.path.isdir(cat_path):
+            for filename in os.listdir(cat_path):
+                if filename.endswith(".docx"):
+                    text = docx2txt.process(os.path.join(cat_path, filename))
+                    details = extract_details(text)
+                    details.update({"Filename": filename, "Category": category})
+                    data.append(details)
+    df = pd.DataFrame(data)
+    df.to_csv(CSV_PATH, index=False)
+    return df
 
-# Display resumes in the selected category
-st.subheader(f"📄 Resumes in '{selected_category}'")
-resumes = [f for f in os.listdir(os.path.join(DATA_DIR, selected_category)) if f.endswith(".docx")]
-st.write(f"Total Resumes: {len(resumes)}")
-st.table(pd.DataFrame({"File Name": resumes}))
+# ---------- Section 1: Table Viewer ----------
+st.markdown("## 📂 Resume Data Viewer")
+category_list = sorted(os.listdir(DATA_DIR))
+selected_cat = st.selectbox("Select Category to View Resumes", ["All"] + category_list)
 
-# Pie chart visualization
-st.subheader("📊 Category Resume Count")
-counts = {cat: len([f for f in os.listdir(os.path.join(DATA_DIR, cat)) if f.endswith('.docx')]) for cat in categories}
+df = load_all_data()
+if selected_cat != "All":
+    df_filtered = df[df["Category"] == selected_cat]
+else:
+    df_filtered = df.copy()
+
+st.dataframe(df_filtered)
+
+# ---------- Section 2: Category Visualization ----------
+st.markdown("## 📊 Category Distribution")
+cat_counts = df["Category"].value_counts()
 fig, ax = plt.subplots()
-ax.pie(counts.values(), labels=counts.keys(), autopct='%1.1f%%', startangle=90)
-ax.axis('equal')
+ax.pie(cat_counts, labels=cat_counts.index, autopct="%1.1f%%", startangle=140)
 st.pyplot(fig)
 
-# Upload and predict
-st.subheader("📤 Upload a Resume for Prediction")
-uploaded_resume = st.file_uploader("Upload a .docx file", type=["docx"])
+# ---------- Section 3: Upload Resume for Prediction ----------
+st.markdown("---")
+st.subheader("📤 Upload Resume for Prediction")
 
-if uploaded_resume:
-    with open(uploaded_resume.name, "wb") as f:
-        f.write(uploaded_resume.getbuffer())
-
-    text = docx2txt.process(uploaded_resume.name)
-    if text.strip() == "":
-        st.error("❌ Could not extract any content from the uploaded resume.")
+uploaded_file = st.file_uploader("Upload a .docx resume", type=["docx"])
+if uploaded_file:
+    text = docx2txt.process(uploaded_file)
+    if not text.strip():
+        st.error("❌ Could not extract text from resume.")
     else:
-        predicted_category = predict_category(text)
+        pred_index, pred_label = predict_category(text)
         details = extract_details(text)
-        details["Predicted Category"] = predicted_category
+        details["Predicted Category"] = pred_label
 
-        st.success(f"✅ Resume classified as: {predicted_category}")
-
-        # Save resume to folder
-        pred_path = os.path.join(DATA_DIR, predicted_category)
-        os.makedirs(pred_path, exist_ok=True)
-        shutil.copy(uploaded_resume.name, os.path.join(pred_path, uploaded_resume.name))
-
-        # Show extracted info
-        st.write("### Extracted Resume Info")
+        st.success(f"✅ Predicted Category: **{pred_label}**")
+        st.write("### 🧾 Extracted Resume Details")
         st.table(pd.DataFrame([details]))
 
-        # Save to Excel and offer download
-        df = pd.DataFrame([details])
-        df.to_excel(OUTPUT_EXCEL, index=False)
-        with open(OUTPUT_EXCEL, "rb") as xls_file:
-            st.download_button("📥 Download Result as Excel", xls_file.read(), file_name=OUTPUT_EXCEL, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        # Save resume in predicted category folder
+        save_dir = os.path.join(DATA_DIR, pred_label)
+        os.makedirs(save_dir, exist_ok=True)
+        save_path = os.path.join(save_dir, uploaded_file.name)
+        with open(save_path, "wb") as f:
+            f.write(uploaded_file.getbuffer())
+
+        # Export prediction to Excel
+        result_df = pd.DataFrame([details])
+        excel_filename = uploaded_file.name.split(".")[0] + "_result.xlsx"
+        result_df.to_excel(excel_filename, index=False)
+        with open(excel_filename, "rb") as f:
+            st.download_button("📥 Download Prediction as Excel", data=f, file_name=excel_filename)
