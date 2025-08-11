@@ -18,6 +18,13 @@ st.set_page_config(page_title="Advanced AI Resume Classifier", layout="wide")
 st.title("🤖 Advanced AI Resume Classifier")
 
 # ---------- Helper Functions ----------
+def extract_name(text):
+    lines = text.strip().split('\n')
+    for line in lines:
+        line = line.strip()
+        if line and len(line.split()) <= 5 and any(c.isalpha() for c in line):
+            return line
+    return "N/A"
 
 def extract_email(text):
     match = re.search(r"[\w\.-]+@[\w\.-]+", text)
@@ -40,7 +47,7 @@ def extract_info(field, text):
 
 def extract_details(text):
     return {
-        "Name": extract_info("Name", text),
+        "Name": extract_name(text),
         "Location": extract_location(text),
         "Email": extract_email(text),
         "Phone": extract_phone(text),
@@ -70,45 +77,12 @@ def load_all_data():
     df.to_csv(CSV_PATH, index=False)
     return df
 
-# --- Data Cleaning Functions ---
-
-def clean_skills(skills_str):
-    if pd.isna(skills_str) or not skills_str.strip():
-        return "N/A"
-    skills = [s.strip() for s in skills_str.split(",")]
-    unique_skills = list(dict.fromkeys([s for s in skills if s and s.lower() != 'n/a']))
-    return ", ".join(unique_skills) if unique_skills else "N/A"
-
-def clean_text(text):
-    if pd.isna(text) or not str(text).strip():
-        return "N/A"
-    cleaned = re.sub(r'\s+', ' ', str(text)).strip()
-    return cleaned if cleaned else "N/A"
-
-def standardize_experience(exp):
-    if pd.isna(exp):
-        return "N/A"
-    match = re.search(r'(\d+(\.\d+)?)(\+)?\s*years?', str(exp), re.IGNORECASE)
-    return match.group(0) if match else "N/A"
-
 # ---------- Section 1: Table Viewer ----------
-
 st.markdown("## 📂 Resume Data Viewer")
-category_list = sorted([cat for cat in os.listdir(DATA_DIR) if os.path.isdir(os.path.join(DATA_DIR, cat))])
+category_list = sorted(os.listdir(DATA_DIR))
 selected_cat = st.selectbox("Select Category to View Resumes", ["All"] + category_list)
 
 df = load_all_data()
-
-# Clean dataframe columns
-df['Skills'] = df['Skills'].apply(clean_skills)
-df['Experience'] = df['Experience'].apply(standardize_experience)
-df['Company'] = df['Company'].apply(clean_text)
-df['Location'] = df['Location'].apply(clean_text)
-df['Name'] = df['Name'].apply(clean_text)
-df['Email'] = df['Email'].apply(clean_text)
-df['Phone'] = df['Phone'].apply(clean_text)
-df['Salary'] = df['Salary'].apply(clean_text)
-
 if selected_cat != "All":
     df_filtered = df[df["Category"] == selected_cat]
 else:
@@ -117,7 +91,6 @@ else:
 st.dataframe(df_filtered)
 
 # ---------- Section 2: Category Visualization ----------
-
 st.markdown("## 📊 Category Distribution")
 cat_counts = df["Category"].value_counts()
 fig, ax = plt.subplots()
@@ -125,7 +98,6 @@ ax.pie(cat_counts, labels=cat_counts.index, autopct="%1.1f%%", startangle=140)
 st.pyplot(fig)
 
 # ---------- Section 3: Upload Resume for Prediction ----------
-
 st.markdown("---")
 st.subheader("📤 Upload Resume for Prediction")
 
