@@ -5,7 +5,8 @@ import docx2txt
 import re
 import pandas as pd
 import matplotlib.pyplot as plt
-import shutil
+import tempfile
+import io
 
 # Load pre-trained model, vectorizer, and label encoder
 model = pickle.load(open("resume_classifier.pkl", "rb"))
@@ -96,7 +97,19 @@ st.subheader("📤 Upload Resume for Prediction")
 
 uploaded_file = st.file_uploader("Upload a .docx resume", type=["docx"])
 if uploaded_file:
-    text = docx2txt.process(uploaded_file)
+    # Save to a temporary file
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp_file:
+        tmp_file.write(uploaded_file.getbuffer())
+        tmp_filepath = tmp_file.name
+
+    text = docx2txt.process(tmp_filepath)
+
+    # Optional: Delete temp file after processing
+    try:
+        os.remove(tmp_filepath)
+    except Exception as e:
+        st.warning(f"Could not delete temp file: {e}")
+
     if not text.strip():
         st.error("❌ Could not extract text from resume.")
     else:
@@ -108,16 +121,18 @@ if uploaded_file:
         st.write("### 🧾 Extracted Resume Details")
         st.table(pd.DataFrame([details]))
 
-        # Save resume in predicted category folder
+        # Save resume in predicted category folder with unique filename
         save_dir = os.path.join(DATA_DIR, pred_label)
         os.makedirs(save_dir, exist_ok=True)
-        save_path = os.path.join(save_dir, uploaded_file.name)
+        unique_filename = f"{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}_{uploaded_file.name}"
+        save_path = os.path.join(save_dir, unique_filename)
         with open(save_path, "wb") as f:
             f.write(uploaded_file.getbuffer())
 
-        # Export prediction to Excel
+        # Export prediction to Excel in-memory and provide download button
         result_df = pd.DataFrame([details])
-        excel_filename = uploaded_file.name.split(".")[0] + "_result.xlsx"
-        result_df.to_excel(excel_filename, index=False)
-        with open(excel_filename, "rb") as f:
-            st.download_button("📥 Download Prediction as Excel", data=f, file_name=excel_filename)
+        excel_buffer = io.BytesIO()
+        result_df.to_excel(excel_buffer, index=False)
+        excel_buffer.seek(0)
+        st.download_button("📥 Download Prediction as Excel", data=excel_buffer, file_name=f"{uploaded_file.name.split('.')[0]}_result.xlsx")
+
