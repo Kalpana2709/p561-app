@@ -20,24 +20,56 @@ st.set_page_config(page_title="Advanced AI Resume Classifier", layout="wide")
 st.title("🤖 Advanced AI Resume Classifier")
 
 # ---------- Helper Functions ----------
+import re
+
 def extract_email(text):
-    match = re.search(r"[\w\.-]+@[\w\.-]+", text)
+    # More comprehensive email pattern
+    match = re.search(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", text)
     return match.group(0) if match else "Not found"
 
 def extract_phone(text):
-    match = re.search(r"(\+91[\s-]?)?[6789]\d{9}", text)
-    return match.group(0) if match else "Not found"
+    # Matches Indian +91 and other phone formats with optional spaces, dashes, or brackets
+    match = re.search(r"(\+91[\-\s]?)?(\(?\d{3,5}\)?[\-\s]?)?[\d\s\-]{6,15}", text)
+    return match.group(0).strip() if match else "Not found"
 
 def extract_location(text):
     locations = ["Bangalore", "Hyderabad", "Chennai", "Mumbai", "Delhi", "Pune", "Kolkata", "Visakhapatnam"]
     for loc in locations:
-        if loc.lower() in text.lower():
+        if re.search(rf"\b{loc}\b", text, re.IGNORECASE):
             return loc
     return "Unknown"
 
 def extract_info(field, text):
-    match = re.search(rf"{field}[:\s\-]*([A-Za-z0-9 ,&.₹]+)", text, re.IGNORECASE)
-    return match.group(1).strip() if match else "N/A"
+    # Tries to find patterns like 'Field: value' or 'Field - value' or 'Field value'
+    pattern = rf"{field}[:\-]?\s*(.+)"
+    matches = re.findall(pattern, text, re.IGNORECASE)
+    if matches:
+        # Sometimes multiple matches; take the first non-empty trimmed string
+        for match in matches:
+            cleaned = match.strip().split('\n')[0].strip()
+            if cleaned:
+                return cleaned
+    return "N/A"
+
+def extract_skills(text):
+    # Look for common skill keywords or a "Skills" section
+    skill_keywords = ["Python", "Java", "SQL", "Excel", "Machine Learning", "Communication", "Leadership",
+                      "C++", "JavaScript", "AWS", "Docker", "Kubernetes", "Excel", "Power BI", "Tableau"]
+    found_skills = []
+    for skill in skill_keywords:
+        if re.search(rf"\b{skill}\b", text, re.IGNORECASE):
+            found_skills.append(skill)
+    return ", ".join(found_skills) if found_skills else "N/A"
+
+def extract_experience(text):
+    # Look for years of experience (e.g., "5 years", "3+ years", "experience: 4 years")
+    match = re.search(r"(\d+(\.\d+)?\+?\s*years?)", text, re.IGNORECASE)
+    return match.group(0) if match else "N/A"
+
+def extract_salary(text):
+    # Look for salary info like 5 LPA, 50000 INR, ₹10,00,000 etc.
+    match = re.search(r"[\₹\$\£]?[\d,]+(\.\d+)?\s*(LPA|INR|Rs\.?|per annum|annual)?", text, re.IGNORECASE)
+    return match.group(0) if match else "N/A"
 
 def extract_details(text):
     return {
@@ -46,10 +78,11 @@ def extract_details(text):
         "Email": extract_email(text),
         "Phone": extract_phone(text),
         "Company": extract_info("Company", text),
-        "Skills": extract_info("Skills", text),
-        "Experience": extract_info("Experience", text),
-        "Salary": extract_info("Salary", text)
+        "Skills": extract_skills(text),
+        "Experience": extract_experience(text),
+        "Salary": extract_salary(text)
     }
+
 
 def predict_category(text):
     tfidf = vectorizer.transform([text])
