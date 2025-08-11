@@ -5,8 +5,6 @@ import docx2txt
 import re
 import pandas as pd
 import matplotlib.pyplot as plt
-import tempfile
-import io
 
 # Load pre-trained model, vectorizer, and label encoder
 model = pickle.load(open("resume_classifier.pkl", "rb"))
@@ -20,56 +18,25 @@ st.set_page_config(page_title="Advanced AI Resume Classifier", layout="wide")
 st.title("🤖 Advanced AI Resume Classifier")
 
 # ---------- Helper Functions ----------
-import re
 
 def extract_email(text):
-    # More comprehensive email pattern
-    match = re.search(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", text)
+    match = re.search(r"[\w\.-]+@[\w\.-]+", text)
     return match.group(0) if match else "Not found"
 
 def extract_phone(text):
-    # Matches Indian +91 and other phone formats with optional spaces, dashes, or brackets
-    match = re.search(r"(\+91[\-\s]?)?(\(?\d{3,5}\)?[\-\s]?)?[\d\s\-]{6,15}", text)
-    return match.group(0).strip() if match else "Not found"
+    match = re.search(r"(\+91[\s-]?)?[6789]\d{9}", text)
+    return match.group(0) if match else "Not found"
 
 def extract_location(text):
     locations = ["Bangalore", "Hyderabad", "Chennai", "Mumbai", "Delhi", "Pune", "Kolkata", "Visakhapatnam"]
     for loc in locations:
-        if re.search(rf"\b{loc}\b", text, re.IGNORECASE):
+        if loc.lower() in text.lower():
             return loc
     return "Unknown"
 
 def extract_info(field, text):
-    # Tries to find patterns like 'Field: value' or 'Field - value' or 'Field value'
-    pattern = rf"{field}[:\-]?\s*(.+)"
-    matches = re.findall(pattern, text, re.IGNORECASE)
-    if matches:
-        # Sometimes multiple matches; take the first non-empty trimmed string
-        for match in matches:
-            cleaned = match.strip().split('\n')[0].strip()
-            if cleaned:
-                return cleaned
-    return "N/A"
-
-def extract_skills(text):
-    # Look for common skill keywords or a "Skills" section
-    skill_keywords = ["Python", "Java", "SQL", "Excel", "Machine Learning", "Communication", "Leadership",
-                      "C++", "JavaScript", "AWS", "Docker", "Kubernetes", "Excel", "Power BI", "Tableau"]
-    found_skills = []
-    for skill in skill_keywords:
-        if re.search(rf"\b{skill}\b", text, re.IGNORECASE):
-            found_skills.append(skill)
-    return ", ".join(found_skills) if found_skills else "N/A"
-
-def extract_experience(text):
-    # Look for years of experience (e.g., "5 years", "3+ years", "experience: 4 years")
-    match = re.search(r"(\d+(\.\d+)?\+?\s*years?)", text, re.IGNORECASE)
-    return match.group(0) if match else "N/A"
-
-def extract_salary(text):
-    # Look for salary info like 5 LPA, 50000 INR, ₹10,00,000 etc.
-    match = re.search(r"[\₹\$\£]?[\d,]+(\.\d+)?\s*(LPA|INR|Rs\.?|per annum|annual)?", text, re.IGNORECASE)
-    return match.group(0) if match else "N/A"
+    match = re.search(rf"{field}[:\s\-]*([A-Za-z0-9 ,&.₹]+)", text, re.IGNORECASE)
+    return match.group(1).strip() if match else "N/A"
 
 def extract_details(text):
     return {
@@ -78,11 +45,10 @@ def extract_details(text):
         "Email": extract_email(text),
         "Phone": extract_phone(text),
         "Company": extract_info("Company", text),
-        "Skills": extract_skills(text),
-        "Experience": extract_experience(text),
-        "Salary": extract_salary(text)
+        "Skills": extract_info("Skills", text),
+        "Experience": extract_info("Experience", text),
+        "Salary": extract_info("Salary", text)
     }
-
 
 def predict_category(text):
     tfidf = vectorizer.transform([text])
@@ -104,12 +70,45 @@ def load_all_data():
     df.to_csv(CSV_PATH, index=False)
     return df
 
+# --- Data Cleaning Functions ---
+
+def clean_skills(skills_str):
+    if pd.isna(skills_str) or not skills_str.strip():
+        return "N/A"
+    skills = [s.strip() for s in skills_str.split(",")]
+    unique_skills = list(dict.fromkeys([s for s in skills if s and s.lower() != 'n/a']))
+    return ", ".join(unique_skills) if unique_skills else "N/A"
+
+def clean_text(text):
+    if pd.isna(text) or not str(text).strip():
+        return "N/A"
+    cleaned = re.sub(r'\s+', ' ', str(text)).strip()
+    return cleaned if cleaned else "N/A"
+
+def standardize_experience(exp):
+    if pd.isna(exp):
+        return "N/A"
+    match = re.search(r'(\d+(\.\d+)?)(\+)?\s*years?', str(exp), re.IGNORECASE)
+    return match.group(0) if match else "N/A"
+
 # ---------- Section 1: Table Viewer ----------
+
 st.markdown("## 📂 Resume Data Viewer")
-category_list = sorted(os.listdir(DATA_DIR))
+category_list = sorted([cat for cat in os.listdir(DATA_DIR) if os.path.isdir(os.path.join(DATA_DIR, cat))])
 selected_cat = st.selectbox("Select Category to View Resumes", ["All"] + category_list)
 
 df = load_all_data()
+
+# Clean dataframe columns
+df['Skills'] = df['Skills'].apply(clean_skills)
+df['Experience'] = df['Experience'].apply(standardize_experience)
+df['Company'] = df['Company'].apply(clean_text)
+df['Location'] = df['Location'].apply(clean_text)
+df['Name'] = df['Name'].apply(clean_text)
+df['Email'] = df['Email'].apply(clean_text)
+df['Phone'] = df['Phone'].apply(clean_text)
+df['Salary'] = df['Salary'].apply(clean_text)
+
 if selected_cat != "All":
     df_filtered = df[df["Category"] == selected_cat]
 else:
@@ -118,6 +117,7 @@ else:
 st.dataframe(df_filtered)
 
 # ---------- Section 2: Category Visualization ----------
+
 st.markdown("## 📊 Category Distribution")
 cat_counts = df["Category"].value_counts()
 fig, ax = plt.subplots()
@@ -125,24 +125,13 @@ ax.pie(cat_counts, labels=cat_counts.index, autopct="%1.1f%%", startangle=140)
 st.pyplot(fig)
 
 # ---------- Section 3: Upload Resume for Prediction ----------
+
 st.markdown("---")
 st.subheader("📤 Upload Resume for Prediction")
 
 uploaded_file = st.file_uploader("Upload a .docx resume", type=["docx"])
 if uploaded_file:
-    # Save to a temporary file
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp_file:
-        tmp_file.write(uploaded_file.getbuffer())
-        tmp_filepath = tmp_file.name
-
-    text = docx2txt.process(tmp_filepath)
-
-    # Optional: Delete temp file after processing
-    try:
-        os.remove(tmp_filepath)
-    except Exception as e:
-        st.warning(f"Could not delete temp file: {e}")
-
+    text = docx2txt.process(uploaded_file)
     if not text.strip():
         st.error("❌ Could not extract text from resume.")
     else:
@@ -154,18 +143,16 @@ if uploaded_file:
         st.write("### 🧾 Extracted Resume Details")
         st.table(pd.DataFrame([details]))
 
-        # Save resume in predicted category folder with unique filename
+        # Save resume in predicted category folder
         save_dir = os.path.join(DATA_DIR, pred_label)
         os.makedirs(save_dir, exist_ok=True)
-        unique_filename = f"{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}_{uploaded_file.name}"
-        save_path = os.path.join(save_dir, unique_filename)
+        save_path = os.path.join(save_dir, uploaded_file.name)
         with open(save_path, "wb") as f:
             f.write(uploaded_file.getbuffer())
 
-        # Export prediction to Excel in-memory and provide download button
+        # Export prediction to Excel
         result_df = pd.DataFrame([details])
-        excel_buffer = io.BytesIO()
-        result_df.to_excel(excel_buffer, index=False)
-        excel_buffer.seek(0)
-        st.download_button("📥 Download Prediction as Excel", data=excel_buffer, file_name=f"{uploaded_file.name.split('.')[0]}_result.xlsx")
-
+        excel_filename = uploaded_file.name.split(".")[0] + "_result.xlsx"
+        result_df.to_excel(excel_filename, index=False)
+        with open(excel_filename, "rb") as f:
+            st.download_button("📥 Download Prediction as Excel", data=f, file_name=excel_filename)
